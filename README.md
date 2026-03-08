@@ -1,92 +1,172 @@
-# Jellyfin Book Cover Plugin
+<p align="center">
+  <img src="docs/images/banner.svg" alt="jellyfin-plugin-book-cover banner" width="900"/>
+</p>
 
-Fallback cover extraction for Jellyfin **book and audiobook** libraries. Works alongside the official [Bookshelf plugin](https://github.com/jellyfin/jellyfin-plugin-bookshelf) as a safety net.
+<p align="center">
+  <strong>Fallback cover extraction for Jellyfin books and audiobooks</strong>
+</p>
 
-- **EPUB**: Searches the archive for cover images by filename (`cover.*`, `portada.*`, `front.*`), by path pattern, or by picking the largest image.
-- **PDF**: Renders the first page as a JPEG via `pdftoppm`.
-- **Audiobooks**: Extracts embedded artwork from MP3, M4A, M4B, FLAC, OGG, and other audio files via ffmpeg raw stream copy — correctly handling mislabeled codec tags (e.g. JPEG data tagged as PNG in ID3) that break Jellyfin's built-in Image Extractor. Also supports folder-based audiobooks (multi-file chapters).
+<p align="center">
+  <a href="https://github.com/GeiserX/jellyfin-plugin-book-cover/releases/latest"><img src="https://img.shields.io/github/v/release/GeiserX/jellyfin-plugin-book-cover?style=flat-square&color=6B4C9A" alt="Latest Release"/></a>
+  <a href="https://github.com/GeiserX/jellyfin-plugin-book-cover/actions"><img src="https://img.shields.io/github/actions/workflow/status/GeiserX/jellyfin-plugin-book-cover/build.yml?branch=main&style=flat-square" alt="Build Status"/></a>
+  <a href="https://github.com/GeiserX/jellyfin-plugin-book-cover/blob/main/LICENSE"><img src="https://img.shields.io/github/license/GeiserX/jellyfin-plugin-book-cover?style=flat-square&color=AA5CC3" alt="License"/></a>
+  <img src="https://img.shields.io/badge/Jellyfin-10.11%2B-6B4C9A?style=flat-square" alt="Jellyfin 10.11+"/>
+  <img src="https://img.shields.io/badge/.NET-9.0-512BD4?style=flat-square" alt=".NET 9.0"/>
+</p>
 
-## When does it run?
+---
 
-Jellyfin tries image providers in order. Built-in providers run first. If they fail to find a cover — or crash on mislabeled embedded art — this plugin kicks in as fallback.
+A Jellyfin plugin that provides **fallback cover-image extraction** for book and audiobook libraries. It works alongside the official [Bookshelf plugin](https://github.com/jellyfin/jellyfin-plugin-bookshelf) as a safety net: when built-in providers fail to find a cover -- or crash on mislabeled embedded art -- Book Cover steps in.
+
+## Supported Formats
+
+| Format | Type | Extraction Method |
+|--------|------|-------------------|
+| PDF | Book | First-page rendering via `pdftoppm` (poppler-utils) |
+| EPUB | Book | Archive introspection with 3-tier image search |
+| MP3 | Audiobook | Embedded art via `ffmpeg` raw stream copy |
+| M4A / M4B | Audiobook | Embedded art via `ffmpeg` raw stream copy |
+| FLAC | Audiobook | Embedded art via `ffmpeg` raw stream copy |
+| OGG / Opus | Audiobook | Embedded art via `ffmpeg` raw stream copy |
+| WMA | Audiobook | Embedded art via `ffmpeg` raw stream copy |
+| AAC | Audiobook | Embedded art via `ffmpeg` raw stream copy |
+| WAV | Audiobook | Embedded art via `ffmpeg` raw stream copy |
+| Folder | Audiobook | Sidecar image lookup, then first-file embedded art |
+
+## How It Works
+
+### PDF -- First Page Rendering
+
+The plugin shells out to `pdftoppm` (from poppler-utils) to render the first page of a PDF as a JPEG. DPI and JPEG quality are configurable. A per-process timeout prevents hangs on malformed files.
+
+### EPUB -- 3-Tier Archive Search
+
+EPUBs are ZIP archives. When the Bookshelf plugin fails to extract a cover, Book Cover opens the archive and searches with three strategies, in order:
+
+1. **By filename** -- files explicitly named `cover`, `portada`, `front`, `frontcover`, or `book_cover` (with any image extension).
+2. **By path** -- any image file with `cover` in its full archive path (e.g., `OEBPS/Images/cover-image.jpg`).
+3. **By size** -- the largest image in the archive (above 5 KB, to skip icons and logos).
+
+### Audio -- Raw Stream Copy with Magic-Byte Detection
+
+Jellyfin's built-in Image Extractor uses ffmpeg to *decode* embedded artwork. This fails when the codec tag does not match the actual data -- a common problem in MP3 files where JPEG cover art is tagged as PNG in ID3 metadata.
+
+Book Cover sidesteps this entirely by using `ffmpeg -vcodec copy` to **raw-copy** the embedded image stream without decoding. It then identifies the actual format by inspecting magic bytes:
+
+| Magic Bytes | Detected Format |
+|-------------|-----------------|
+| `FF D8 FF` | JPEG |
+| `89 50 4E 47` | PNG |
+| `47 49 46` | GIF |
+| `52 49 46 46 ... 57 45 42 50` | WebP |
+
+Any leading null/padding bytes injected by the raw stream copy are stripped automatically.
+
+### Folder-Based Audiobooks
+
+For multi-file audiobooks stored as a directory of chapter files, the plugin:
+
+1. Checks for sidecar images in the folder (`cover.jpg`, `folder.jpg`, `front.jpg`, `poster.jpg`, `thumb.jpg`).
+2. Falls back to extracting embedded art from the first audio file in the directory.
+
+## Installation
+
+### From Releases
+
+1. Download `book-cover.zip` from the [latest release](https://github.com/GeiserX/jellyfin-plugin-book-cover/releases/latest).
+2. Extract `Jellyfin.Plugin.PdfCover.dll` into your Jellyfin plugins directory:
+   ```
+   <jellyfin-config>/plugins/PdfCover_3.0.0.0/Jellyfin.Plugin.PdfCover.dll
+   ```
+3. Restart Jellyfin.
+
+### From Plugin Repository
+
+Add the following repository URL in **Dashboard > Plugins > Repositories**:
+
+```
+https://raw.githubusercontent.com/GeiserX/jellyfin-plugin-book-cover/main/manifest.json
+```
+
+Then install **Book Cover** from the plugin catalog and restart Jellyfin.
+
+### Building from Source
+
+```bash
+dotnet build Jellyfin.Plugin.PdfCover/Jellyfin.Plugin.PdfCover.csproj -c Release
+```
+
+The compiled DLL will be at:
+```
+Jellyfin.Plugin.PdfCover/bin/Release/net9.0/Jellyfin.Plugin.PdfCover.dll
+```
 
 ## Requirements
 
-- Jellyfin 10.11+
-- [Bookshelf plugin](https://github.com/jellyfin/jellyfin-plugin-bookshelf) v13+ (recommended, handles standard EPUB covers)
-- `poppler-utils` in the Jellyfin container (only needed for PDF support)
-- `ffmpeg` (bundled with Jellyfin Docker images — no extra install needed for audio covers)
+| Dependency | Required For | Notes |
+|------------|-------------|-------|
+| Jellyfin 10.11+ | All features | Minimum supported server version |
+| `poppler-utils` | PDF covers | Provides `pdftoppm`; not bundled with Jellyfin |
+| `ffmpeg` | Audio covers | Bundled with Jellyfin Docker images |
+| [Bookshelf plugin](https://github.com/jellyfin/jellyfin-plugin-bookshelf) v13+ | EPUB covers | Recommended; handles standard EPUB covers as primary provider |
 
-### Installing poppler-utils
+### Installing poppler-utils (Docker)
 
-Add to your Jellyfin docker-compose entrypoint:
+Add this to your `docker-compose.yml` entrypoint so `pdftoppm` is available at runtime:
 
 ```yaml
 entrypoint:
   - /bin/bash
   - -c
   - |
-    which pdftoppm > /dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq --no-install-recommends poppler-utils > /dev/null 2>&1 && rm -rf /var/lib/apt/lists/*)
+    which pdftoppm > /dev/null 2>&1 || \
+      (apt-get update -qq && \
+       apt-get install -y -qq --no-install-recommends poppler-utils > /dev/null 2>&1 && \
+       rm -rf /var/lib/apt/lists/*)
     exec /jellyfin/jellyfin
 ```
 
-## Installation
-
-1. Download the latest release from the [Releases](https://github.com/GeiserX/jellyfin-plugin-book-cover/releases) page
-2. Extract `Jellyfin.Plugin.PdfCover.dll` into your Jellyfin plugins directory:
-   ```
-   /config/plugins/PdfCover_3.0.0.0/Jellyfin.Plugin.PdfCover.dll
-   ```
-3. Restart Jellyfin
-4. In each Books/Audiobooks library settings, ensure **Book Cover** is listed under Image Fetchers
-
-## Library Configuration
-
-For the plugin to run during scans, image fetchers must be enabled for the relevant types:
-
-**Books library** — Image Fetchers for the **Book** type:
-1. **Epub Metadata** (from Bookshelf plugin — primary)
-2. **Book Cover** (this plugin — fallback)
-
-**Audiobooks library** — Image Fetchers for the **AudioBook** type:
-1. **Image Extractor** (Jellyfin built-in — primary)
-2. **Book Cover** (this plugin — fallback for mislabeled embedded art)
-
 ## Configuration
 
-In the Jellyfin admin panel under **Dashboard > Plugins > Book Cover**:
+After installation, configure the plugin in **Dashboard > Plugins > Book Cover**:
 
-- **DPI** — Resolution for PDF rendering (default: 150). Higher = better quality, slower.
-- **JPEG Quality** — Output compression (default: 85). Lower = smaller files.
-- **Timeout** — Max seconds per extraction (default: 30). Applies to both pdftoppm and ffmpeg.
+| Setting | Default | Description |
+|---------|---------|-------------|
+| DPI | 150 | Resolution for PDF first-page rendering. Higher values produce sharper covers at the cost of speed. |
+| JPEG Quality | 85 | Output compression level (1--100). Lower values produce smaller files. |
+| Timeout | 30 s | Maximum time allowed per extraction. Applies to both `pdftoppm` and `ffmpeg`. |
 
-## How Audio Cover Extraction Works
+### Library Image-Fetcher Order
 
-Jellyfin's built-in Image Extractor uses ffmpeg to decode embedded artwork. This fails when the codec tag doesn't match the actual data (common in MP3 files where JPEG cover art is tagged as PNG in ID3).
+For the plugin to run during library scans, it must be enabled in each library's image-fetcher settings:
 
-This plugin uses `ffmpeg -vcodec copy` to raw-copy the embedded image stream without decoding, then detects the actual format from magic bytes:
+**Books library** (Image Fetchers for the Book type):
 
-| Magic bytes | Format |
-|------------|--------|
-| `FF D8 FF` | JPEG |
-| `89 50 4E 47` | PNG |
-| `47 49 46` | GIF |
-| `52 49 46 46 ... 57 45 42 50` | WebP |
+1. Epub Metadata *(Bookshelf plugin -- primary)*
+2. Book Cover *(this plugin -- fallback)*
 
-For folder-based audiobooks (multi-file chapters), the plugin extracts artwork from the first audio file in the directory.
+**Audiobooks library** (Image Fetchers for the AudioBook type):
 
-## EPUB Cover Search Strategy
+1. Image Extractor *(Jellyfin built-in -- primary)*
+2. Book Cover *(this plugin -- fallback for mislabeled embedded art)*
 
-When the Bookshelf plugin fails to extract a cover from an EPUB, this plugin searches the ZIP archive:
+## Troubleshooting
 
-1. **By filename**: files named `cover`, `portada`, `front`, `frontcover`, `book_cover` (with image extensions)
-2. **By path**: any image file with `cover` in its path (e.g., `OEBPS/Images/cover-image.jpg`)
-3. **By size**: the largest image in the archive (>5 KB, to skip icons and logos)
+**PDF covers are not extracted**
+- Verify that `pdftoppm` is installed and accessible: run `which pdftoppm` inside the Jellyfin container.
+- Check the Jellyfin log for `pdftoppm not found`.
 
-## Building
+**Audio covers are not extracted**
+- Confirm `ffmpeg` is available: run `which ffmpeg` inside the container.
+- Check the Jellyfin log for `ffmpeg not found`.
 
-```bash
-dotnet build Jellyfin.Plugin.PdfCover/Jellyfin.Plugin.PdfCover.csproj -c Release
-```
+**Covers appear for some books but not others**
+- The plugin only acts as a fallback. If a higher-priority provider already supplied a cover, this plugin will not run.
+- To force re-extraction, delete the existing cover image for the item in Jellyfin and rescan the library.
 
-Output: `Jellyfin.Plugin.PdfCover/bin/Release/net9.0/Jellyfin.Plugin.PdfCover.dll`
+**Extracted cover looks corrupted**
+- This is rare but can happen if the embedded art stream contains unusual padding. Open an issue with the file format details and the Jellyfin log output.
+
+## License
+
+This project is licensed under the [GNU General Public License v3.0](LICENSE).
